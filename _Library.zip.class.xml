@@ -1,25 +1,48 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Export generator="Cache" version="25">
 <Class name="%Library.zip">
-<Description>
-Class to create and extract zip
-https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
-https://www.zlib.net/manual.htm
-win 32 bit date time format https://msdn.microsoft.com/en-us/library/9kkf9tah.aspx
-
-Not yet working on big endian platform
-Limitation 32 bit for zip size and files in zip.
-</Description>
-
+<Description><![CDATA[
+Class to create and extract zip<br/>
+https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT<br/>
+https://www.zlib.net/manual.htm<br/>
+win 32 bit date time format https://msdn.microsoft.com/en-us/library/9kkf9tah.aspx<br/>
+source https://github.com/nlzv/isc_zip<br/>
+<br/>
+example how to zip
+<EXAMPLE>
+set zip=##class(%zip).%New()
+set zip.SourceDirectory="/mnt/tmp/zip/testpack/"
+set zip.files(1)="test1.txt"
+set zip.files(2)="test2.txt"
+set zip.packfile="/mnt/tmp/zip/testpack/test.zip"
+do zip.pack()
+</EXAMPLE>
+example how to unzip
+<EXAMPLE>
+set zip=##class(%zip).%New()
+set zip.packfile="/mnt/tmp/zip/testunpack/test.zip"
+do zip.open()
+set idlast=$order(zip.files(""),-1)
+set zip.TargetDirectory="/mnt/tmp/zip/testunpack/"
+for i=1:1:idlast zip.unpackbyid(i)
+</EXAMPLE>
+limitations<br/>
+not yet for bigendian cache kernel<br/>
+only 32 bits i.e. zip and files insize < ~ 4GB<br/>
+on unicode cache kernel only 8bits file names (i.e. in latin)<br/>]]></Description>
 <Super>%RegisteredObject</Super>
 <TimeCreated>64918,52465.852234</TimeCreated>
 
 <Property name="files">
+<Description>
+files array in LFH (list file header)</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="idxlfhfiles">
+<Description>
+file index index map relative file path to LDH index</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
@@ -36,39 +59,42 @@ Limitation 32 bit for zip size and files in zip.
 
 <Property name="fcomments">
 <Description>
-file comment</Description>
+file comments array, LFH index</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="LFHo">
+<Description>
+offsets of LFHs</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="LFHbin">
+<Description>
+binary images of LFHs</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="CDRo">
+<Description>
+CDR (common directory name) s offsets</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="CDRbin">
+<Description>
+CDRs binary images</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
-<UDLText name="T">
-<Content><![CDATA[
-// the name of zip/pack file
-
-]]></Content>
-</UDLText>
-
 <Property name="packfile">
+<Description>
+the name of zip/pack file</Description>
 <Type>%String</Type>
 </Property>
 
@@ -107,6 +133,8 @@ it becomes current during pack()</Description>
 </Property>
 
 <Property name="TargetDir">
+<Description>
+directory to unpack files</Description>
 <Type>%String</Type>
 </Property>
 
@@ -117,9 +145,9 @@ check wether directory is created</Description>
 </Property>
 
 <Property name="use">
-<Description>
-use = 0 existed archive extraxt
-use = 1 create archive add</Description>
+<Description><![CDATA[
+use = 0 existed archive, unpack<br/>
+use = 1 create archive, pack, add file to arhive<br/>]]></Description>
 <Type>%Boolean</Type>
 </Property>
 
@@ -143,21 +171,24 @@ time of the last pack/unpack function</Description>
 </Property>
 
 <Property name="size">
-<Description>
-size during pack/unpack functions</Description>
+<Description><![CDATA[
+size during pack/unpack functions<br/>
+in future it will be rsize ]]></Description>
 <Type>%String</Type>
 </Property>
 
 <Property name="wsize">
-<Description>
-writing size during pack/unpack functions</Description>
+<Description><![CDATA[
+writing size during pack/unpack functions<br/>
+not yet calculated]]></Description>
 <Type>%String</Type>
 </Property>
 
 <Method name="open">
-<Description>
-return %zip object open existed zip archive
-files is populated</Description>
+<Description><![CDATA[
+open existed zip archive<br/>
+return %zip object<br/> 
+files property is populated by relative filenames in archive<br/>]]></Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>zipfile</FormalSpec>
 <Implementation><![CDATA[
@@ -346,11 +377,11 @@ add one file to packfile</Description>
 <Method name="unpack">
 <Description>
 unzip archive</Description>
-<FormalSpec>zipfile="",targdetdir=""</FormalSpec>
+<FormalSpec>zipfile="",targetdir=""</FormalSpec>
 <Implementation><![CDATA[
   set idlast=$order(..files(""),-1)
   for id=1:1:idlast {
-    do zip.unpackbyid(id,targetdir)
+    do ..unpackbyid(id,targetdir)
   }
 ]]></Implementation>
 </Method>
@@ -539,7 +570,7 @@ error
 <Implementation><![CDATA[
   set foffset=..LFHo(id)
   do ..getLFH(..LFHbin(id),,.ver,.flag,.meth,.time,.date,.crc,.zipsize,.size,.fnlen,.extralen)
-  quit foffset+..structlen(..lfhmeta())+fnlen+extrlen
+  quit foffset+..structlen(..lfhmeta())+fnlen+extralen
 ]]></Implementation>
 </Method>
 
@@ -621,30 +652,40 @@ parse Central Directory Header</Description>
 </Method>
 
 <Method name="lfhsig">
+<Description>
+list file header signature</Description>
 <ClassMethod>1</ClassMethod>
 <Implementation><![CDATA[ quit $zlc($zhex("04034b50"))
 ]]></Implementation>
 </Method>
 
 <Method name="cdrsig">
+<Description>
+common directory record signature</Description>
 <ClassMethod>1</ClassMethod>
 <Implementation><![CDATA[ quit $zlc($zhex("02014b50"))
 ]]></Implementation>
 </Method>
 
 <Method name="zip64eocdrsig">
+<Description>
+zip64 end of current directory record signature</Description>
 <ClassMethod>1</ClassMethod>
 <Implementation><![CDATA[ quit $zlc($zhex("06064b50"))
 ]]></Implementation>
 </Method>
 
 <Method name="zip64eocdlsig">
+<Description>
+zip64 end of current directory list signature</Description>
 <ClassMethod>1</ClassMethod>
 <Implementation><![CDATA[ quit $zlc($zhex("07064b50"))
 ]]></Implementation>
 </Method>
 
 <Method name="eocdrsig">
+<Description>
+end of current directory record signature</Description>
 <ClassMethod>1</ClassMethod>
 <Implementation><![CDATA[ quit $zlc($zhex("06054b50"))
 ]]></Implementation>
@@ -739,6 +780,8 @@ calculate length of struct basing on metainfo</Description>
 </Method>
 
 <Method name="mkEOCDR">
+<Description>
+create end of common directory record</Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>bin,offset="",size="",n="",zipcomment=""</FormalSpec>
 <Implementation><![CDATA[
