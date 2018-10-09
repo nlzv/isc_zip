@@ -27,7 +27,6 @@ set zip.TargetDirectory="/mnt/tmp/zip/testunpack/"
 for i=1:1:idlast zip.unpackbyid(i)
 </EXAMPLE>
 limitations<br/>
-not yet for bigendian cache kernel<br/>
 only 32 bits i.e. zip and files insize < ~ 4GB<br/>
 on unicode cache kernel only 8bits file names (i.e. in latin)<br/>]]></Description>
 <Super>%RegisteredObject</Super>
