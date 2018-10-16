@@ -11,7 +11,7 @@ source https://github.com/nlzv/isc_zip<br/>
 example how to zip
 <EXAMPLE>
 set zip=##class(%zip).%New()
-set zip.SourceDirectory="/mnt/tmp/zip/testpack/"
+set zip.SourceDir="/mnt/tmp/zip/testpack/"
 set zip.files(1)="test1.txt"
 set zip.files(2)="test2.txt"
 set zip.packfile="/mnt/tmp/zip/testpack/test.zip"
@@ -19,15 +19,11 @@ do zip.pack()
 </EXAMPLE>
 example how to unzip
 <EXAMPLE>
-set zip=##class(%zip).%New()
-set zip.packfile="/mnt/tmp/zip/testunpack/test.zip"
-do zip.open()
-set idlast=$order(zip.files(""),-1)
-set zip.TargetDirectory="/mnt/tmp/zip/testunpack/"
-for i=1:1:idlast zip.unpackbyid(i)
+do zip=##class(%zip).open("/mnt/tmp/zip/testunpack/test.zip")
+set zip.TargetDir="/mnt/tmp/zip/testunpack/"
+do zip.unpack()
 </EXAMPLE>
 limitations<br/>
-only 32 bits i.e. zip and files insize < ~ 4GB<br/>
 on unicode cache kernel only 8bits file names (i.e. in latin)<br/>]]></Description>
 <Super>%RegisteredObject</Super>
 <TimeCreated>64918,52465.852234</TimeCreated>
@@ -91,6 +87,13 @@ CDRs binary images</Description>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
+<Property name="DDbin">
+<Description>
+data descriptor</Description>
+<Type>String</Type>
+<MultiDimensional>1</MultiDimensional>
+</Property>
+
 <Property name="packfile">
 <Description>
 the name of zip/pack file</Description>
@@ -123,7 +126,7 @@ zip comment</Description>
 <Type>%String</Type>
 </Property>
 
-<Property name="SourceDirectory">
+<Property name="SourceDir">
 <Description>
 source directory
 add file from this directory
@@ -139,14 +142,22 @@ directory to unpack files</Description>
 
 <Property name="TargetSubDirs">
 <Description>
-check wether directory is created</Description>
+check wether Target sub directory is created</Description>
 <Type>%String</Type>
+<MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="use">
 <Description><![CDATA[
 use = 0 existed archive, unpack<br/>
 use = 1 create archive, pack, add file to arhive<br/>]]></Description>
+<Type>%Boolean</Type>
+</Property>
+
+<Property name="forcezip64">
+<Description><![CDATA[
+1 use zip64 extra extension even file size less than 2**32-1<br/>
+0 use zip64 extra extension if file size more than 2**32-1<br/>]]></Description>
 <Type>%Boolean</Type>
 </Property>
 
@@ -210,17 +221,19 @@ files property is populated by relative filenames in archive<br/>]]></Descriptio
  set foffset=0
  set ilfh=0 set icdr=0
  set fnlen=0,ziplen=0,extralen=0
- set err=0 
+ set err=0
+ set maxsize=4294967295
+ #;B  ; open
  read bin#4 set foffset=foffset+4
  if $E(bin,$L(bin)-3,$L(bin))'=lfhsig { for  { read x#1 if $zeof=-1 { set err=1 quit } if foffset>512 { set err=2 quit } set bin=bin_x set foffset=foffset+1 if $E(bin,$L(bin)-3,$L(bin))=lfhsig || ($E(bin,$L(bin)-3,$L(bin))=cdrsig) { quit  } }}
  if err>0 set zip.error=err quit zip
- #;B  ; open start
+ #;B  ; open start zip
  for {
    if bin=lfhsig {
      #;B  ;LFH start
      set lfhbin=bin read bin#(lfhlen-4)  set lfhbin=lfhbin_bin set ilfh=ilfh+1 
      set zip.LFHo(ilfh)=foffset-4 
-     do ..getLFH(lfhbin,.sig,.version,.flag,.CompressionMethod,.time,.date,.crc,.zipsize,.size,.fnlen,.extralen) 
+     do ..getLFH(lfhbin,.sig,.version,.flag,.method,.time,.date,.crc,.zipsize,.size,.fnlen,.extralen)     
      if fnlen>0 { read fname#fnlen  set zip.files(ilfh)=fname } else { set fname="" }
      if extralen>0 { read extra#extralen } else { set extra="" }
      
@@ -228,7 +241,9 @@ files property is populated by relative filenames in archive<br/>]]></Descriptio
      if $zb(flag,8,1) {
         B ;data descriptor not implemented
      } 
-     set zip.LFHbin(ilfh)=lfhbin_fname_extra
+     set lfhbin=lfhbin_fname_extra
+     if size=maxsize || (zipsize=maxsize) do zip.LFHgetFileSizes(.lfhbin,.size,.zipsize,.zip64)
+     set zip.LFHbin(ilfh)=lfhbin
      set foffset=foffset+lfhlen-4+fnlen+extralen+zipsize
      use zipfile:foffset
      #;B  ;LFH end
@@ -276,11 +291,34 @@ files property is populated by relative filenames in archive<br/>]]></Descriptio
 ]]></Implementation>
 </Method>
 
-<Method name="pack">
+<Method name="closepack">
 <Description>
-create zip archive with list of files in files property
-SourceDirectory relative
-packfile argument override packfile property</Description>
+close pack file</Description>
+<Implementation><![CDATA[
+ #; write CDRs 
+ #;B ; start add CDRs
+ 
+ set len=""
+ set i="" for {
+    set i=$order(..LFHbin(i),1,binlfh) quit:i=""
+    do ..mkCDRfromLFH(.bincdr,binlfh,..LFHo(i))
+    set len=len+$L(bincdr)
+    W bincdr
+ }
+
+ #; write end of CDR
+ #;B  ; write end of CDR
+ set n=$order(..files(""),-1)
+ do ..mkEOCDR(.bineocdr,cdroffset,len,n) 
+ W bineocdr
+]]></Implementation>
+</Method>
+
+<Method name="pack">
+<Description><![CDATA[
+create zip archive with list of files in files property<br/>
+SourceDir relative<br>
+packfile argument override packfile property<br/>]]></Description>
 <FormalSpec>packfile=""</FormalSpec>
 <Implementation><![CDATA[
  set ..time=$zh
@@ -289,7 +327,7 @@ packfile argument override packfile property</Description>
  else { set ..packfile=packfile }
  try { close packfile } catch {} open packfile:("NWUK\RAW\")
  use packfile
- set dir=$SYSTEM.Process.CurrentDirectory(..SourceDirectory)
+ set dir=$SYSTEM.Process.CurrentDirectory(..SourceDir)
  set ..lfhoffset=0
  set i="" for { set i=$order(..files(i),1,file) quit:i=""  do ..packAddFileById(i) }
  use packfile:..lfhoffset
@@ -333,10 +371,31 @@ add one file to packfile</Description>
   set tsodbc=$zdt(hlocalmoddattime,3)
   set date=..dosDateYMDtoBin($E(tsodbc,1,4),$E(tsodbc,6,7),$E(tsodbc,9,10))
   set time=..dosTimeHMStoBin($E(tsodbc,12,13),$E(tsodbc,15,16),$E(tsodbc,18,19))
+  set maxsize=2**32-1
+  if size>maxsize || ..forcezip64 { set zip64=1 }
+  else { set zip64=0 }
+  #; version 2.0 low order byte
+  set version=$C(20,0)
+  set flag=$C(0,0)
+  #; method deflate
+  set method=$C(8,0)
   #;B ; before make lfh
-  do ..mkLFH(.binlfh,$C(20,0),$C(0,0),$C(8,0),time,date,/*crc*/,/*zipsize*/,size)
+  if zip64=1 {
+    set extraZip64=$C(1,0)_$ZWC(16)_$ZQC(size)_$ZQC(0)
+#if 0   
+    #; data descriptor
+    set flag=$ZWC(8)
+    #; datadesc
+    set datadesc=$C(0,0,0,0)_$ZQC(zipsize)_$ZQC(size)
+    #;set datadesc= $$datadescsig()_datadesc
+    set ..DDbin(i)=datadesc
+#endif    
+  } 
+  if zip64 { do ..mkLFH(.binlfh,version,flag,method,time,date,/*crc*/, maxsize, maxsize)}
+  else { do ..mkLFH(.binlfh,version,flag,method,time,date,/*crc*/,/*zipsize*/, size) }
   #;B ; after make lfh
   do ..LFHsetFile(.binlfh,file)
+  if zip64 { do ..LFHsetExtra(.binlfh,extraZip64) }
   set ..LFHbin(id)=binlfh
   use packfile:..lfhoffset
   W binlfh
@@ -378,10 +437,13 @@ add one file to packfile</Description>
 unzip archive</Description>
 <FormalSpec>zipfile="",targetdir=""</FormalSpec>
 <Implementation><![CDATA[
+  if targetdir'="" { set ..TargetDir=targetdir }
+  else { set targetdir=..TargetDir }
+  set curdir=$SYSTEM.Process.CurrentDirectory(targetdir)
+  kill ..TargetSubDirs
   set idlast=$order(..files(""),-1)
-  for id=1:1:idlast {
-    do ..unpackbyid(id,targetdir)
-  }
+  for id=1:1:idlast { do ..unpackbyid(id,targetdir) }
+  do $SYSTEM.Process.CurrentDirectory(curdir)
 ]]></Implementation>
 </Method>
 
@@ -402,16 +464,19 @@ unpack just one file</Description>
 <Implementation><![CDATA[
    set $ztrap="exit"
    set ..ZE=""
+   set maxsize=4294967295
+   set zip64=0
    set restorepack=0
    set packfile=..packfile
    set lfhbin=..LFHbin(id)
    set filename=..files(id)
-   #; check directory of file and create it
-   #;if '$data(..TargetDir) { }
    set offset=..LFHo(id)
    close packfile
    open packfile:("RWUK\RAW\") use packfile
    do ..getLFH(..LFHbin(id),,.ver,.flag,.meth,.time,.date,.crc,.zipsize,.size,.fnlen,.extralen)
+   #;B  ; unpackbyid.getLFH
+   if size=maxsize || (zipsize=maxsize ) { set zip64=1 }
+   if zip64=1 { do ..LFHgetFileSizes(..LFHbin(id),.size,.zipsize) } 
    set oraw=offset+$L(..LFHbin(id))
    set gzipminhdr=..gzipminhdr()
    set gziphdrlen=$L(gzipminhdr)
@@ -439,6 +504,13 @@ unpack just one file</Description>
    close packfile
    
    set targetfile=targetdir_filename
+   #; check directory of file and create it if it is missed   
+   set dir=##class(%File).GetDirectory(targetfile)   
+   if '$D(..TargetSubDirs(dir)) {
+     if '##class(%File).DirectoryExists(dir) { set ret=##class(%File).CreateDirectoryChain(dir) }
+     set ..TargetSubDirs(dir)=""
+   } 
+
    #;B ;copy
    open packfile:("RUK\RAW\")
    use packfile:ogziphdr
@@ -446,7 +518,7 @@ unpack just one file</Description>
    open targetfile:("NWUK\RAW\")
    set len=0
    set buflen=65536
-   B  ;loop
+   #;B  ;loop
    for {
      use packfile
      if len+buflen<size { read bin#buflen }
@@ -560,7 +632,62 @@ error
 <Method name="LFHsetZipSize">
 <ClassMethod>1</ClassMethod>
 <FormalSpec>bin,zipsize</FormalSpec>
-<Implementation><![CDATA[ set $E(bin,19,22)=$ZLC(zipsize)
+<Implementation><![CDATA[
+ set lfhlen=..lfhlen()
+ set fnlen=$ZWA($E(bin,27,28))
+ set zipsizeold=$E(bin,19,22)
+ if zipsizeold=$C(255,255,255,255) {
+   set o=lfhlen+fnlen
+   set extrahid=$E(bin,o+1,o+2)
+#; expect to be 1st
+   if extrahid=$C(1,0) {
+     set $E(bin,lfhlen+fnlen+##expression(1+4+8),lfhlen+fnlen+##expression(1+4+8+8))=$ZQC(zipsize)
+   } 
+#; this is error   
+   else {} 
+ }
+ else {
+   set $E(bin,19,22)=$ZLC(zipsize)
+ }
+]]></Implementation>
+</Method>
+
+<Method name="LFHgetFileSizes">
+<FormalSpec>bin,size,zipsize,zip64</FormalSpec>
+<Implementation><![CDATA[
+  set lfhlen=..lfhlen
+  set zip64id=$C(1,0)
+  set maxsize=$C(255,255,255,255)
+  set fnlen=$ZWA(bin,27)
+  set extrasize=$ZWA(bin,29)
+  set size=$E(bin,19,22)
+  set zipsize=$E(bin,23,26)
+  if size'=maxsize || (zipsize'=maxsize) { set size=$ZLA(size) set zipsize=$ZLA(zipsize) quit }
+  set extra=$E(bin,lfhlen+fnlen+1,lfhlen+fnlen+extrasize)
+  set o=0 for  {
+    set extrahid=$E(extra,o+1,o+2)
+    set extrahlen=$ZWA(extra,o+3)
+    if extrahid=zip64id quit
+    set o=o+4+extrahlen
+    if o'< extrasize quit
+  }
+  if extrahid=zip64id {   
+    set size=$ZQA(extra,o+##expression(1+4))
+    set zipsize=$ZQA(extra,o+##expression(1+4+8))
+  }
+  else { set size="" set zipsize="" }
+]]></Implementation>
+</Method>
+
+<Method name="LFHsetExtra">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>bin,extra</FormalSpec>
+<Implementation><![CDATA[
+  set extralen=$L(extra)
+  set lfhlen=30
+  do ..LFHgetLengths(.bin,.fnlen,.extrlenold)  
+  set $E(bin,29,30)=$ZWC(extralen)
+  set bin=$E(bin,1,lfhlen+fnlen)_extra
 ]]></Implementation>
 </Method>
 
@@ -605,6 +732,8 @@ parse Central Directory Header</Description>
 <ClassMethod>1</ClassMethod>
 <FormalSpec>cdrbin,lfhbin,lfho="",ifa="",efa="",fcomment=""</FormalSpec>
 <Implementation><![CDATA[
+  set maxsize=4294967295
+  set maxsizebin=$C(255,255,255,255)
   set lfhlen=..structlen(..lfhmeta())
   set cdrlen=..structlen(..cdrmeta())
   set cdrbin=$TR($J("",cdrlen)," ",$C(0))
@@ -622,9 +751,13 @@ parse Central Directory Header</Description>
   #; crc
   set $E(cdrbin,17,20)=$E(lfhbin,15,18)
   #; compressed size
-  set $E(cdrbin,21,24)=$E(lfhbin,19,22)
+  set size=$E(lfhbin,19,22)
+  if size=$C(255,255,255,255) { set zip64=1 } 
+  else { set zip64=0 set $E(cdrbin,21,24)=size }
   #; uncompressed size
-  set $E(cdrbin,25,28)=$E(lfhbin,23,26)
+  set zipsize=$E(lfhbin,23,26)
+  if zipsize=$C(255,255,255,255)||(zip64=1) { set zip64=1 } 
+  else { set zip64=0 set $E(cdrbin,25,28)=$E(lfhbin,23,26) }  
   #; filename len
   set fnlen=$E(lfhbin,27,28)
   set $E(cdrbin,29,30)=fnlen
@@ -633,10 +766,26 @@ parse Central Directory Header</Description>
   set extralen=$E(lfhbin,29,30)
   set $E(cdrbin,31,32)=extralen
   set extralen=$ZWA(extralen)
-  if lfho'="" set $E(cdrbin,43,46)=$ZLC(lfho)
+  if lfho'="" {
+    if lfho>maxsize { set zip64=1 }
+    else { set $E(cdrbin,43,46)=$ZLC(lfho) }
+  }
   #; fcomment
   if fcomment'="" { set $E(bin,33,34)=$ZWC($L(fcomment)) }
-  set cdrbin=cdrbin_$E(lfhbin,lfhlen+1,lfhlen+fnlen)_$E(lfhbin,lfhlen+fnlen+1,lfhlen+fnlen+extralen)_fcomment
+  if zip64 {
+     set extra=$E(lfhbin,lfhlen+fnlen+1,lfhlen+fnlen+extralen)
+     if extra="" {
+        set $E(cdrbin,21,24)=maxsizebin
+        set $E(cdrbin,25,28)=maxsizebin  
+        set extra=$C(1,0)_$C(16,0)_$ZLC(size)_$ZLC(zipsize)
+     } 
+     set $E(cdrbin,43,46)=maxsizebin
+     set extra=$E(extra,1,2)_$ZWC($ZWA(extra,3)+8)_$E(extra,##expression(4+1),##expression(4+16))_$ZQC(lfh)
+     set cdrbin=cdrbin_$E(lfhbin,lfhlen+1,lfhlen+fnlen)_extra_fcomment
+  }
+  else { 
+    set cdrbin=cdrbin_$E(lfhbin,lfhlen+1,lfhlen+fnlen)_$E(lfhbin,lfhlen+fnlen+1,lfhlen+fnlen+extralen)_fcomment
+  }
 ]]></Implementation>
 </Method>
 
