@@ -29,25 +29,30 @@ on unicode cache kernel only 8bits file names (i.e. in latin)<br/>]]></Descripti
 <TimeCreated>64918,52465.852234</TimeCreated>
 
 <Property name="files">
-<Description>
-files array in LFH (list file header)</Description>
+<Description><![CDATA[
+files LFH (list file header) array<br/>
+also used as files to add in zip arhive<br/>]]></Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="idxlfhfiles">
 <Description>
-file index index map relative file path to LDH index</Description>
+relative file path to LFH index map </Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="cdrfiles">
+<Description><![CDATA[
+files CDR (common diretory record) array<br/>]]></Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
 <Property name="idxcdrfiles">
+<Description>
+relative file path to CDR index map </Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
@@ -75,7 +80,7 @@ binary images of LFHs</Description>
 
 <Property name="CDRo">
 <Description>
-CDR (common directory name) s offsets</Description>
+CDRs (common directory name) offsets</Description>
 <Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
@@ -102,7 +107,21 @@ the name of zip/pack file</Description>
 
 <Property name="lfhlen">
 <Description>
-length static part of list file header</Description>
+length of static part of list file header</Description>
+<Type>%Integer</Type>
+</Property>
+
+<Property name="eocdr64len">
+<Type>%Integer</Type>
+</Property>
+
+<Property name="eocdl64len">
+<Type>%Integer</Type>
+</Property>
+
+<Property name="cdrlen">
+<Description>
+length of static part of common directory record</Description>
 <Type>%Integer</Type>
 </Property>
 
@@ -155,6 +174,8 @@ use = 1 create archive, pack, add file to arhive<br/>]]></Description>
 </Property>
 
 <Property name="zip64">
+<Description><![CDATA[
+need use zip64 extension due to some component larger then 2**32-1 bytes<br/>]]></Description>
 <Type>%Boolean</Type>
 </Property>
 
@@ -269,12 +290,24 @@ files property is populated by relative filenames in archive<br/>]]></Descriptio
       use zipfile:foffset
       #;B ; CDR end
    }
-   #; 
+   #; zip64eocdr
    elseif bin=zip64eocdrsig {
-      B ;
-   } 
+      #;B ; zip64eocdrsig start
+      read eocdr64bin#(zip.eocdr64len-4)
+      set eocdr64bin=bin_eocdr64bin
+      set len=$ZQA(eocdr64bin,5)
+      set len=len-zip.eocdr64len+12
+      if len'=0 read extbin#len
+      set foffset=foffset+zip.eocdr64len+len
+      #;B ; zip64eocdrsig end
+   }
+   #; zip64eocdlsig
    elseif bin=zip64eocdlsig {
-      B ;
+      #;B ; zip64eocdlsig start
+      read eocdl64bin#(zip.eocdl64len-4)
+      set eocdl64bin=bin_eocdl64bin
+      set foffset=foffset+zip.eocdl64len
+      #;B ; zip64eocdlsig end
    } 
    #; end of central directory record
    elseif bin=eocdrsig {
@@ -1025,6 +1058,8 @@ create end of common directory record</Description>
 </Method>
 
 <Method name="BuildFileIndex">
+<Description>
+build maps index to file name for lfs and cdr array</Description>
 <Implementation><![CDATA[
  kill ..idxlfhfiles set i="" for { set i=$order(..files(i),1,file) quit:i=""  set ..idxlfhfiles(file)=i }
  kill ..idxcdrfiles set i="" for { set i=$order(..cdrfiles(i),1,file) quit:i=""  set ..idxcdrfiles(file)=i }
@@ -1085,6 +1120,9 @@ YYYYMMDDHHMMSS</Description>
 <ReturnType>%Status</ReturnType>
 <Implementation><![CDATA[
   set ..lfhlen=..lfhlen()
+  set ..cdrlen=..structlen(..cdrmeta())
+  set ..eocdr64len=..structlen(..eocdr64meta())
+  set ..eocdl64len=..structlen(..eocdl64meta())
   set ..gzipminhdrlen=$L(..gzipminhdr())
   quit $$$OK
 ]]></Implementation>
