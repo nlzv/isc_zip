@@ -154,6 +154,10 @@ use = 1 create archive, pack, add file to arhive<br/>]]></Description>
 <Type>%Boolean</Type>
 </Property>
 
+<Property name="zip64">
+<Type>%Boolean</Type>
+</Property>
+
 <Property name="forcezip64">
 <Description><![CDATA[
 1 use zip64 extra extension even file size less than 2**32-1<br/>
@@ -180,7 +184,7 @@ time of the last pack/unpack function</Description>
 <Type>%String</Type>
 </Property>
 
-<Property name="size">
+<Property name="rsize">
 <Description><![CDATA[
 size during pack/unpack functions<br/>
 in future it will be rsize ]]></Description>
@@ -293,15 +297,19 @@ files property is populated by relative filenames in archive<br/>]]></Descriptio
 
 <Method name="closepack">
 <Description>
-close pack file</Description>
+close pack file, i.e. create common directories records</Description>
 <Implementation><![CDATA[
  #; write CDRs 
  #;B ; start add CDRs
- 
- set len=""
+ set cdroffset=..lfhoffset
+ set oeocdr=cdroffset
+ set zip64=0 
+ set len=0
  set i="" for {
     set i=$order(..LFHbin(i),1,binlfh) quit:i=""
-    do ..mkCDRfromLFH(.bincdr,binlfh,..LFHo(i))
+    do ..mkCDRfromLFH(.bincdr,binlfh,..LFHo(i),,,,.zip64)
+    #;B  ; mkdCDRfromLFH done
+    if zip64=1 { set ..zip64=1 }
     set len=len+$L(bincdr)
     W bincdr
  }
@@ -309,8 +317,21 @@ close pack file</Description>
  #; write end of CDR
  #;B  ; write end of CDR
  set n=$order(..files(""),-1)
- do ..mkEOCDR(.bineocdr,cdroffset,len,n) 
- W bineocdr
+ if ..zip64=1 {
+   do ..mkEOCDR64(.bineocdr64,cdroffset,len,n) 
+   W bineocdr64
+   do ..mkEOCDL64(.bineocdl64,cdroffset+len)
+   W bineocdl64
+   do ..mkEOCDR(.bineocdr,cdroffset#4294967296,len#4294967296,n)
+   #;do ..mkEOCDR(.bineocdr,4294967295,4294967295,n)
+   #;do ..mkEOCDR(.bineocdr,0,0,n)
+   W bineocdr
+   #;B  ; eocdr64
+ }  
+ else { 
+   do ..mkEOCDR(.bineocdr,cdroffset,len,n) 
+   W bineocdr
+ }
 ]]></Implementation>
 </Method>
 
@@ -322,39 +343,24 @@ packfile argument override packfile property<br/>]]></Description>
 <FormalSpec>packfile=""</FormalSpec>
 <Implementation><![CDATA[
  set ..time=$zh
- set ..size=0
+ set ..rsize=0
+ set ..zip64=0
  if packfile="" { set packfile=..packfile }
  else { set ..packfile=packfile }
  try { close packfile } catch {} open packfile:("NWUK\RAW\")
  use packfile
  set dir=$SYSTEM.Process.CurrentDirectory(..SourceDir)
  set ..lfhoffset=0
- set i="" for { set i=$order(..files(i),1,file) quit:i=""  do ..packAddFileById(i) }
- use packfile:..lfhoffset
- set cdroffset=..lfhoffset
- #; write CDRs 
- #;B ; start add CDRs
- set len=""
- set i="" for {
-    set i=$order(..LFHbin(i),1,binlfh) quit:i=""
-    do ..mkCDRfromLFH(.bincdr,binlfh,..LFHo(i))
-    set len=len+$L(bincdr)
-    W bincdr
- }
-
- #; write end of CDR
- #;B  ; write end of CDR
- set n=$order(..files(""),-1)
- do ..mkEOCDR(.bineocdr,cdroffset,len,n) 
- W bineocdr
-
+ set i="" for { set i=$order(..files(i),1,file) quit:i=""  do ..packbyid(i) }
+ use packfile:..lfhoffset 
+ do ..closepack()
  close packfile
  do $SYSTEM.Process.CurrentDirectory(dir)
  set ..time=$zh-..time
 ]]></Implementation>
 </Method>
 
-<Method name="packAddFileById">
+<Method name="packbyid">
 <Description>
 add one file to packfile</Description>
 <FormalSpec>id</FormalSpec>
@@ -366,7 +372,7 @@ add one file to packfile</Description>
   set lfhoffset=..lfhoffset
   use packfile:lfhoffset
   set size=##class(%File).GetFileSize(file)
-  set ..size=..size+size
+  set ..rsize=..rsize+size
   set hlocalmoddattime=$zu(140,2,file,0)
   set tsodbc=$zdt(hlocalmoddattime,3)
   set date=..dosDateYMDtoBin($E(tsodbc,1,4),$E(tsodbc,6,7),$E(tsodbc,9,10))
@@ -429,6 +435,7 @@ add one file to packfile</Description>
   set ..LFHo(id)=..lfhoffset
   set ..lfhoffset=offset
   #;B  ; pack add file by id end
+  if zip64 { set ..zip64=1 }
 ]]></Implementation>
 </Method>
 
@@ -730,7 +737,7 @@ parse Central Directory Header</Description>
 
 <Method name="mkCDRfromLFH">
 <ClassMethod>1</ClassMethod>
-<FormalSpec>cdrbin,lfhbin,lfho="",ifa="",efa="",fcomment=""</FormalSpec>
+<FormalSpec>cdrbin,lfhbin,lfho="",ifa="",efa="",fcomment="",zip64</FormalSpec>
 <Implementation><![CDATA[
   set maxsize=4294967295
   set maxsizebin=$C(255,255,255,255)
@@ -751,13 +758,15 @@ parse Central Directory Header</Description>
   #; crc
   set $E(cdrbin,17,20)=$E(lfhbin,15,18)
   #; compressed size
-  set size=$E(lfhbin,19,22)
-  if size=$C(255,255,255,255) { set zip64=1 } 
-  else { set zip64=0 set $E(cdrbin,21,24)=size }
+  set zipsize=$E(lfhbin,19,22)
+  set $E(cdrbin,21,24)=zipsize
+  if zipsize=maxsizebin { set zip64=1 } 
+  else { set zip64=0 }
   #; uncompressed size
-  set zipsize=$E(lfhbin,23,26)
-  if zipsize=$C(255,255,255,255)||(zip64=1) { set zip64=1 } 
-  else { set zip64=0 set $E(cdrbin,25,28)=$E(lfhbin,23,26) }  
+  set size=$E(lfhbin,23,26)
+  if size=maxsizebin ||(zip64=1) { set zip64=1 } 
+  else { set zip64=0  }  
+  set $E(cdrbin,25,28)=$E(lfhbin,23,26)
   #; filename len
   set fnlen=$E(lfhbin,27,28)
   set $E(cdrbin,29,30)=fnlen
@@ -775,13 +784,14 @@ parse Central Directory Header</Description>
   if zip64 {
      set extra=$E(lfhbin,lfhlen+fnlen+1,lfhlen+fnlen+extralen)
      if extra="" {
-        set $E(cdrbin,21,24)=maxsizebin
-        set $E(cdrbin,25,28)=maxsizebin  
-        set extra=$C(1,0)_$C(16,0)_$ZLC(size)_$ZLC(zipsize)
-     } 
+        set extra=$C(1,0)_$C(16,0)_$ZQC(size)_$ZQC(zipsize)
+     }      
+     set $E(cdrbin,21,24)=maxsizebin
+     set $E(cdrbin,25,28)=maxsizebin
      set $E(cdrbin,43,46)=maxsizebin
-     set extra=$E(extra,1,2)_$ZWC($ZWA(extra,3)+8)_$E(extra,##expression(4+1),##expression(4+16))_$ZQC(lfh)
+     set extra=$E(extra,1,2)_$ZWC($ZWA(extra,3)+8)_$E(extra,##expression(4+1),##expression(4+16))_$ZQC(lfho)
      set cdrbin=cdrbin_$E(lfhbin,lfhlen+1,lfhlen+fnlen)_extra_fcomment
+     set $E(cdrbin,31,32)=$ZWC($L(extra))
   }
   else { 
     set cdrbin=cdrbin_$E(lfhbin,lfhlen+1,lfhlen+fnlen)_$E(lfhbin,lfhlen+fnlen+1,lfhlen+fnlen+extralen)_fcomment
@@ -815,6 +825,14 @@ common directory record signature</Description>
 ]]></Implementation>
 </Method>
 
+<Method name="eocdrsig">
+<Description>
+end of current directory record signature</Description>
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[ quit $zlc($zhex("06054b50"))
+]]></Implementation>
+</Method>
+
 <Method name="zip64eocdrsig">
 <Description>
 zip64 end of current directory record signature</Description>
@@ -825,17 +843,9 @@ zip64 end of current directory record signature</Description>
 
 <Method name="zip64eocdlsig">
 <Description>
-zip64 end of current directory list signature</Description>
+zip64 end of current directory locator signature</Description>
 <ClassMethod>1</ClassMethod>
 <Implementation><![CDATA[ quit $zlc($zhex("07064b50"))
-]]></Implementation>
-</Method>
-
-<Method name="eocdrsig">
-<Description>
-end of current directory record signature</Description>
-<ClassMethod>1</ClassMethod>
-<Implementation><![CDATA[ quit $zlc($zhex("06054b50"))
 ]]></Implementation>
 </Method>
 
@@ -918,6 +928,36 @@ calculate length of struct basing on metainfo</Description>
 ]]></Implementation>
 </Method>
 
+<Method name="eocdr64meta">
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+ quit $LB(
+   $LB("end of central dir signature",4),
+   $LB("size of zip64 end of central directory record",8),
+   $LB("version made by",2),
+   $LB("version needed to extract",2),
+   $LB("number of this disk",4),
+   $LB("number of the disk with the start of the central directory",4),   
+   $LB("total number of entries in the central directory on this disk",8),
+   $LB("total number of entries in the central directory",8),
+   $LB("size of the central directory",8),
+   $LB("offset of start of central directory with respect to the starting disk number",8)   
+ )
+]]></Implementation>
+</Method>
+
+<Method name="eocdl64meta">
+<ClassMethod>1</ClassMethod>
+<Implementation><![CDATA[
+ quit $LB(
+   $LB("zip64 end of central dir locator signature",4),
+   $LB("number of the disk with the start of the zip64 end of central directory",4),
+   $LB("relative offset of the zip64 end of central directory record",8),
+   $LB("total number of disks",4)
+ )
+]]></Implementation>
+</Method>
+
 <Method name="getEOCDR">
 <ClassMethod>1</ClassMethod>
 <FormalSpec>bin,sig,zipcommentlen</FormalSpec>
@@ -946,6 +986,41 @@ create end of common directory record</Description>
   if offset'="" { set $E(bin,17,20)=$ZLC(offset) }
   if zipcomment'="" {
   }
+]]></Implementation>
+</Method>
+
+<Method name="mkEOCDR64">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>bin,offset="",size="",n="",ext=""</FormalSpec>
+<Implementation><![CDATA[
+  set len=..structlen(..eocdr64meta())
+  set bin=$TR($J("",len)," ",$C(0))
+  set $E(bin,1,4)=..zip64eocdrsig()
+  set $E(bin,##expression(4+1),##expression(4+8))=$ZQC(len-12)
+  set $E(bin,##expression(4+8+1),##expression(4+8+2))=$C(45,0)
+  set $E(bin,##expression(4+8+3),##expression(4+8+4))=$C(45,0)
+  if n'="" {
+    #; total number of entries on this diks
+    set $E(bin,##expression(24+1),##expression(24+8))=$ZQC(n) 
+    #; total number of entries
+    set $E(bin,##expression(32+1),##expression(32+8))=$ZQC(n) 
+  }   
+  if size'="" set $E(bin,##expression(40+1),##expression(40+8))=$ZQC(size)
+  if offset'="" { set $E(bin,##expression(48+1),##expression(48+8))=$ZQC(offset) }
+  if ext'="" {
+  }
+]]></Implementation>
+</Method>
+
+<Method name="mkEOCDL64">
+<ClassMethod>1</ClassMethod>
+<FormalSpec>bin,oeocdr,disknum=1</FormalSpec>
+<Implementation><![CDATA[
+  set len=..structlen(..eocdl64meta())  
+  set bin=$TR($J("",len)," ",$C(0))
+  set $E(bin,1,4)=..zip64eocdlsig()
+  set $E(bin,##expression(8+1),##expression(8+8))=$ZQC(oeocdr)
+  set $E(bin,##expression(8+8+1),##expression(8+8+4))=$ZLC(disknum)
 ]]></Implementation>
 </Method>
 
