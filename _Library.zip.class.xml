@@ -19,7 +19,7 @@ do zip.pack()
 </EXAMPLE>
 example how to unzip
 <EXAMPLE>
-do zip=##class(%zip).open("/mnt/tmp/zip/testunpack/test.zip")
+set zip=##class(%zip).open("/mnt/tmp/zip/testunpack/test.zip")
 set zip.TargetDir="/mnt/tmp/zip/testunpack/"
 do zip.unpack()
 </EXAMPLE>
