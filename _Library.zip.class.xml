@@ -219,6 +219,11 @@ not yet calculated]]></Description>
 <Type>%String</Type>
 </Property>
 
+<Property name="unpackErrors">
+<Type>%String</Type>
+<MultiDimensional>1</MultiDimensional>
+</Property>
+
 <Method name="open">
 <Description><![CDATA[
 open existed zip archive<br/>
@@ -502,11 +507,13 @@ unpack just one file</Description>
 <Method name="unpackbyid">
 <FormalSpec>id,targetdir</FormalSpec>
 <Implementation><![CDATA[
-   set $ztrap="exit"
+   set $ztrap="error"
    set ..ZE=""
+   set io=$io
    set maxsize=4294967295
    set zip64=0
    set restorepack=0
+   set targetfile=""
    set packfile=..packfile
    set lfhbin=..LFHbin(id)
    set filename=..files(id)
@@ -516,7 +523,7 @@ unpack just one file</Description>
    do ..getLFH(..LFHbin(id),,.ver,.flag,.meth,.time,.date,.crc,.zipsize,.size,.fnlen,.extralen)
    #;B  ; unpackbyid.getLFH
    if size=maxsize || (zipsize=maxsize ) { set zip64=1 }
-   if zip64=1 { do ..LFHgetFileSizes(..LFHbin(id),.size,.zipsize) } 
+   if zip64=1 { do ..LFHgetFileSizes(..LFHbin(id),.size,.zipsize) }
    set oraw=offset+$L(..LFHbin(id))
    set gzipminhdr=..gzipminhdr()
    set gziphdrlen=$L(gzipminhdr)
@@ -539,13 +546,13 @@ unpack just one file</Description>
    #; now put in file gziptlr
    use packfile:ogziptlr
    read savedgziptlr#gziptlrlen
-   use packfile:ogziptlr   
-   write gziptlr   
+   use packfile:ogziptlr
+   write gziptlr
    close packfile
    
    set targetfile=targetdir_filename
-   #; check directory of file and create it if it is missed   
-   set dir=##class(%File).GetDirectory(targetfile)   
+   #; check directory of file and create it if it is missed
+   set dir=##class(%File).GetDirectory(targetfile)
    if '$D(..TargetSubDirs(dir)) {
      if '##class(%File).DirectoryExists(dir) { set ret=##class(%File).CreateDirectoryChain(dir) }
      set ..TargetSubDirs(dir)=""
@@ -566,12 +573,14 @@ unpack just one file</Description>
      set len=len+$L(bin)
      use targetfile write bin
      if len'<size quit
-   } 
-   close packfile
-   close targetfile
+   }
+exit
+   use io
+   try { close packfile } catch {}
+   try { close targetfile } catch {}
    
    #; restore updates gzip header and tailer back
-exit
+
    if restorepack {
       open packfile:("WUK\RAW\")
       if $data(savedgziphdr) {
@@ -582,8 +591,8 @@ exit
         use packfile:ogziptlr
         write savedgziptlr
       }
-      close packfile
-   } 
+      use io close packfile
+   }
    quit
 error
   set $ztrap=""
