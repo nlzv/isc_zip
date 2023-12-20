@@ -95,7 +95,7 @@ CDRs binary images</Description>
 <Property name="DDbin">
 <Description>
 data descriptor</Description>
-<Type>String</Type>
+<Type>%String</Type>
 <MultiDimensional>1</MultiDimensional>
 </Property>
 
